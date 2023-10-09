@@ -1,0 +1,241 @@
+---
+title: "Union Membership in the United States"
+output:
+  html_document:
+    df_print: paged
+---
+
+This analysis examines the trend in union membership in the United States from 1973 to 2022 with a view on the percentage of the employed labor who were union members and the wage difference as a result of union membership. We also take a look at the difference by education attainment, and ethnic background and gender.
+
+The data is part of the tidytuesday repo for the week of September 5, 2023, and comes from the <b><i>Union Membership, Coverage, and Earnings</i></b> from the CPS by Barry Hirsch (Georgia State University), David Macpherson (Trinity University), and William Even (Miami University). They claim a copyright on the data, and state that "Use of data requires citation."
+
+The analysis relies heavily on the <b>R tidyverse</b> package and borrows from other R packages when necessary.
+
+```{r}
+
+demographics <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-09-05/demographics.csv')
+wages <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-09-05/wages.csv')
+states <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-09-05/states.csv')
+
+```
+
+```{r}
+library(tidyverse)
+```
+
+Rudimentary data cleaning was performed to remove duplicated rows in the datasets.
+
+```{r}
+#remove dupe rows
+wages_cleaned <- unique(wages)
+demographics_cleaned <- unique(demographics)
+states_cleaned <- unique(states)
+```
+
+The <b>demographics</b> and <b>wages</b> datasets were joined on the `year` and `facet` columns. The `facet` column describes the sector or demographic group contained in this row of data. The merged dataset can be viewed below.
+
+```{r}
+demographics_wages <- merge(x=demographics_cleaned,y=wages_cleaned, 
+      by = c("year", "facet"),
+      all=TRUE)
+
+demographics_wages <- demographics_wages |>
+  rename('demographics_sample_size' = 'sample_size.x',
+         'wages_sample_size' = 'sample_size.y')
+
+demographics_wages
+
+# "private sector: all" + "public sector: all" = "all wage and salary workers"
+```
+
+First, let's compare the private sector with the public sector.
+
+```{r}
+demographics_wages_private_public_sectors <- demographics_wages |>  
+  filter(facet %in% c("private sector: all", "public sector: all"))
+```
+
+It is evident in the chart below that the majority of employment (unit in thousands) was in the private sector in each year cross-sectionally. In addition, the private sector has a 6.9 times the rate of increase yearly than the public sector.
+
+```{r}
+# get best fitting line for private sector
+demographics_wages_private_sector <- demographics_wages_private_public_sectors |>
+  filter(facet == "private sector: all")
+
+my_mod_private <- lm(employment ~ year, demographics_wages_private_sector) 
+
+coeff_private=coefficients(my_mod_private)
+#print(coeff_private)
+
+# get best fitting line for public sector
+demographics_wages_public_sector <- demographics_wages_private_public_sectors |>
+  filter(facet == "public sector: all")
+
+my_mod_public <- lm(employment ~ year, demographics_wages_public_sector) 
+
+coeff_public=coefficients(my_mod_public)
+#print(coeff_public)
+#eq = paste0("y = ", round(coeff[2],1), "*x + ", round(coeff[1],1))
+
+ggplot(data=demographics_wages_private_public_sectors, aes(x=year, y=employment, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top") +
+  geom_abline(intercept = coeff_private[1], slope = coeff_private[2], color="red", linetype="dashed",) +
+  geom_abline(intercept = coeff_public[1], slope = coeff_public[2], color="red", linetype="dashed",) +
+  annotate("text", x = 2010, y = 100000, label = "yearly increase of 1186", color="red") + 
+  annotate("text", x = 2010, y = 25000, label = "yearly increase of 150", color="red")
+
+```
+
+```{r}
+ggplot(data=demographics_wages_private_public_sectors, aes(x=year, y=p_members, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top") +
+  geom_rect(aes(xmin=1976, xmax=1980, ymin=min(p_members),
+                ymax=max(p_members)), color="transparent", fill="orange", alpha=0.008)
+```
+
+```{r warning = FALSE}
+ggplot(data=demographics_wages_private_public_sectors, aes(x=year, y=p_covered, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top") 
+```
+
+```{r}
+ggplot(data=demographics_wages_private_public_sectors, aes(x=year, group=facet)) + 
+  geom_line(aes(y = union_wage, colour = "union_wage", linetype=facet)) + 
+  geom_line(aes(y = nonunion_wage, colour = "nonunion_wage", linetype=facet)) +
+  theme(legend.position="top")
+```
+
+```{r}
+ggplot(data=demographics_wages_private_public_sectors, aes(x=year, y=union_wage_premium_adjusted, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top")
+```
+
+```{r}
+
+demographics_wages_private_sectors <- demographics_wages_private_public_sectors |>
+  filter(facet == 'private sector: all') |>
+  select(year, at_cap) |>
+  mutate(facet = 'private sector: all')
+
+demographics_wages_public_sectors <- demographics_wages_private_public_sectors |>
+  filter(facet == 'public sector: all') |> 
+  select(year, at_cap) |>
+  mutate(facet = 'public sector: all')
+
+demographics_wages_at_cap_diff <- merge(x=demographics_wages_private_sectors,y=demographics_wages_public_sectors, 
+      by = "year",
+      all=TRUE) |>
+  mutate(at_cap = at_cap.x - at_cap.y) |>
+  select(year, at_cap) |>
+  mutate(facet = 'delta')
+
+demographics_wages_at_cap <- rbind(demographics_wages_private_sectors, demographics_wages_public_sectors, demographics_wages_at_cap_diff)
+
+# Reverse the order as follow
+demographics_wages_at_cap$facet <- factor(demographics_wages_at_cap$facet, levels = c('public sector: all', 'private sector: all', 'delta'))
+
+ggplot() +
+  geom_line(data=demographics_wages_at_cap, aes(x=year, y=at_cap, group=facet, linetype=facet, color=facet)) +
+  scale_linetype_manual(values=c("dotted", "dashed", "solid")) +
+  scale_color_manual(values = c("black", "black", "red")) +
+  theme(legend.position="top")
+```
+
+```{r}
+demographics_wages_race_gender <- demographics_wages |>  
+  filter(facet %in% c("demographics: black female", "demographics: black male", 
+                      "demographics: hispanic female", "demographics: hispanic male",
+                      "demographics: white female", "demographics: white male"))
+```
+
+```{r}
+ggplot(data=demographics_wages_race_gender, aes(x=year, y=employment, group=facet, color=facet, linetype=facet)) +
+  geom_line() +
+  scale_color_manual(values = c("demographics: black female"="#ca7dcc",
+                                "demographics: black male"="#ca7dcc",
+                                "demographics: hispanic female"="#1b98e0",
+                                "demographics: hispanic male"="#1b98e0",
+                                "demographics: white female"="#02e302",
+                                "demographics: white male"="#02e302")) +
+  scale_linetype_manual(values=c(1,2,1,2,1,2)) +
+  theme(legend.position="top")
+```
+
+```{r}
+ggplot(data=demographics_wages_race_gender, aes(x=year, y=p_members, group=facet, color=facet, linetype=facet)) +
+  geom_line() +
+  scale_color_manual(values = c("demographics: black female"="#ca7dcc",
+                                "demographics: black male"="#ca7dcc",
+                                "demographics: hispanic female"="#1b98e0",
+                                "demographics: hispanic male"="#1b98e0",
+                                "demographics: white female"="#02e302",
+                                "demographics: white male"="#02e302")) +
+  scale_linetype_manual(values=c(1,2,1,2,1,2)) +
+  theme(legend.position="top") + 
+  geom_rect(aes(xmin=1976, xmax=1980, ymin=min(p_members),
+                ymax=max(p_members)), color="transparent", fill="orange", alpha=0.008)
+
+```
+
+```{r}
+ggplot(data=demographics_wages_race_gender, aes(x=year, y=union_wage_premium_adjusted, group=facet, color=facet, linetype=facet)) +
+  geom_line() +
+  scale_color_manual(values = c("demographics: black female"="#ca7dcc",
+                                "demographics: black male"="#ca7dcc",
+                                "demographics: hispanic female"="#1b98e0",
+                                "demographics: hispanic male"="#1b98e0",
+                                "demographics: white female"="#02e302",
+                                "demographics: white male"="#02e302")) +
+  scale_linetype_manual(values=c(1,2,1,2,1,2)) +
+  theme(legend.position="top")
+```
+
+```{r}
+#install.packages("gghighlight")
+library(gghighlight)
+```
+
+```{r warning = FALSE}
+ggplot(data=demographics_wages_race_gender, aes(x=year, y=union_wage_premium_adjusted, group=facet, color=facet, linetype=facet)) +
+  geom_line() +
+  scale_color_manual(values = c("demographics: black female"="#ca7dcc",
+                                "demographics: black male"="#ca7dcc",
+                                "demographics: hispanic female"="#1b98e0",
+                                "demographics: hispanic male"="#1b98e0",
+                                "demographics: white female"="#02e302",
+                                "demographics: white male"="#02e302")) +
+  scale_linetype_manual(values=c(1,2,1,2,1,2)) +
+  gghighlight(max(union_wage_premium_adjusted) > 0.35,  label_key = facet) +  
+  theme(legend.position="top")
+```
+
+```{r}
+demographics_wages_education <- demographics_wages |>  
+  filter(facet %in% c("demographics: college or more", "demographics: less than college"))
+```
+
+```{r}
+ggplot(data=demographics_wages_education, aes(x=year, y=employment, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top")
+```
+
+```{r}
+ggplot(data=demographics_wages_education, aes(x=year, y=p_members, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top") +
+  geom_rect(aes(xmin=1976, xmax=1984, ymin=min(p_members),
+                ymax=max(p_members)), color="transparent", fill="orange", alpha=0.008)
+```
+
+```{r}
+ggplot(data=demographics_wages_education, aes(x=year, y=union_wage_premium_adjusted, group=facet)) +
+  geom_line(aes(linetype=facet)) +
+  theme(legend.position="top") + 
+  geom_rect(aes(xmin=1976, xmax=1984, ymin=min(union_wage_premium_adjusted),
+                ymax=max(union_wage_premium_adjusted)), color="transparent", fill="orange", alpha=0.008)
+```

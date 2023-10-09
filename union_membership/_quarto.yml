@@ -1,0 +1,11 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - union_membership_in_us.Rmd
+
+website:
+  title: "Union Membership in U.S."
+  
+editor: visual
+
